@@ -48,10 +48,10 @@ public class TLSAttackerConnector {
 		Security.addProvider(new BouncyCastleProvider());
 		
 		config = TlsConfig.createConfig();
-		config.setHost("localhost:4433");
+		//config.setHost("localhost:4433");
 		config.setHighestProtocolVersion(ProtocolVersion.TLS12);
 		// Timeout that is used when waiting for incoming messages
-		config.setTlsTimeout(200);
+		config.setTlsTimeout(100);
 
 		initialise();
 	}
@@ -91,13 +91,18 @@ public class TLSAttackerConnector {
 		cipherSuites.add(CipherSuite.TLS_RSA_WITH_3DES_EDE_CBC_SHA);
 		context.setClientSupportedCiphersuites(cipherSuites);
 		
+		// Set supported compression algorithms
+		List<CompressionMethod> compressionMethods = new LinkedList<>();	
+		compressionMethods.add(CompressionMethod.NULL);
+		context.setClientSupportedCompressions(compressionMethods);
+
 		// Create the transport handler that takes care of the actual network communication with the TLS implementation
-		TransportHandler th = TransportHandlerFactory.createTransportHandler(targetHostname, targetPort, context.getConfig()
+		TransportHandler transporthandler = TransportHandlerFactory.createTransportHandler(targetHostname, targetPort, context.getConfig()
                 .getConnectionEnd(), context.getConfig().getTlsTimeout(), context.getConfig().getTimeout(), context
                 .getConfig().getTransportHandlerType());
-		th.initialize();
+		transporthandler.initialize();
 		
-		context.setTransportHandler(th);
+		context.setTransportHandler(transporthandler);
         context.setRecordLayer(RecordLayerFactory.getRecordLayer(context.getConfig().getRecordLayerType(), context));
         
         executor = ActionExecutorFactory.getActionExecutor(context.getConfig().getExecutorType(), context);		
@@ -158,9 +163,9 @@ public class TLSAttackerConnector {
 	 * 
 	 * @param inputSymbol A string indicating which type of message to send
 	 * @return A string representation of the message types that were received
-	 * @throws IOException
+	 * @throws Exception 
 	 */
-	public String processInput(String inputSymbol) throws IOException {
+	public String processInput(String inputSymbol) throws Exception {
 		switch(inputSymbol) {
 		case "RESET":
 			reset();
@@ -194,6 +199,9 @@ public class TLSAttackerConnector {
 			
 			sendMessage(ad);
 			break;
+		
+		default:
+			throw new Exception("Unknown input symbol");
 		}
 		
 		return receiveMessages();
@@ -203,9 +211,9 @@ public class TLSAttackerConnector {
 	 * Start listening on the provided to port for a connection to provide input symbols and return output symbols. Only one connection is accepted at the moment.
 	 * 
 	 * @param port The port to listen on
-	 * @throws IOException
+	 * @throws Exception 
 	 */
-	public void startListening(int port) throws IOException {
+	public void startListening(int port) throws Exception {
 		ServerSocket serverSocket = new ServerSocket(port);
 	    Socket clientSocket = serverSocket.accept();
 		
@@ -225,20 +233,21 @@ public class TLSAttackerConnector {
 	    serverSocket.close();
 	}
 	
-	public static void main(String[] args) throws IOException{
+	public static void main(String[] args) {
 		try {
 			TLSAttackerConnector connector = new TLSAttackerConnector();
 			connector.startListening(4444);
+/*
+			System.out.println("ServerHello: " + connector.processInput("ServerHello"));				
+			System.out.println("ClientHello: " + connector.processInput("ClientHello"));
+			System.out.println("RSAClientKeyExchange: " + connector.processInput("RSAClientKeyExchange"));
+			System.out.println("ChangeCipherSpec: " + connector.processInput("ChangeCipherSpec"));
+			System.out.println("Finished: " + connector.processInput("Finished"));
+			System.out.println("ApplicationData: " + connector.processInput("ApplicationData"));
+*/
 		} catch(Exception e) {
 			System.err.println("Error occured: " + e.getMessage());
 			e.printStackTrace(System.err);
 		}
-		/*
-		System.out.println("ClientHello: " + connector.processInput("ClientHello"));
-		System.out.println("RSAClientKeyExchange: " + connector.processInput("RSAClientKeyExchange"));
-		System.out.println("ChangeCipherSpec: " + connector.processInput("ChangeCipherSpec"));
-		System.out.println("Finished: " + connector.processInput("Finished"));
-		System.out.println("ApplicationData: " + connector.processInput("ApplicationData"));
-		*/
 	}
 }
