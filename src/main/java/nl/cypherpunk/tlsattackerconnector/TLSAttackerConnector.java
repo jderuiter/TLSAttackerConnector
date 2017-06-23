@@ -1,8 +1,12 @@
 package nl.cypherpunk.tlsattackerconnector;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -10,6 +14,11 @@ import java.security.Security;
 import java.util.LinkedList;
 import java.util.List;
 
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.config.Configuration;
+import org.apache.logging.log4j.core.config.LoggerConfig;
 import org.bouncycastle.crypto.tls.AlertDescription;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
@@ -23,6 +32,7 @@ import de.rub.nds.tlsattacker.core.workflow.action.ReceiveAction;
 import de.rub.nds.tlsattacker.core.workflow.action.SendAction;
 import de.rub.nds.tlsattacker.core.workflow.action.executor.ActionExecutor;
 import de.rub.nds.tlsattacker.core.workflow.action.executor.ActionExecutorFactory;
+import de.rub.nds.tlsattacker.transport.SimpleTransportHandler;
 import de.rub.nds.tlsattacker.transport.TransportHandler;
 import de.rub.nds.tlsattacker.transport.TransportHandlerFactory;
 
@@ -47,11 +57,17 @@ public class TLSAttackerConnector {
 		// Add BouncyCastle, otherwise encryption will be invalid and it's not possible to perform a valid handshake
 		Security.addProvider(new BouncyCastleProvider());
 		
+		// Disable logging
+		LoggerContext loggerContext = (LoggerContext) LogManager.getContext(false);
+		Configuration ctxConfig = loggerContext.getConfiguration();
+		LoggerConfig loggerConfig = ctxConfig.getLoggerConfig(LogManager.ROOT_LOGGER_NAME);
+		loggerConfig.setLevel(Level.OFF); 
+		
 		config = TlsConfig.createConfig();
 		//config.setHost("localhost:4433");
 		config.setHighestProtocolVersion(ProtocolVersion.TLS12);
 		// Timeout that is used when waiting for incoming messages
-		config.setTlsTimeout(100);
+		config.setTimeout(100);
 
 		initialise();
 	}
@@ -83,12 +99,13 @@ public class TLSAttackerConnector {
 		
 		// Set initial configuration to support out of order messages
 		context.setSelectedCipherSuite(CipherSuite.TLS_RSA_WITH_3DES_EDE_CBC_SHA);
+		//context.setSelectedCipherSuite(CipherSuite.TLS_DHE_RSA_WITH_AES_128_CBC_SHA256);
 		context.setSelectedProtocolVersion(ProtocolVersion.TLS12);
 		context.setHighestClientProtocolVersion(ProtocolVersion.TLS12);
 		
 		// Create the list of supported cipher suites
 		List<CipherSuite> cipherSuites = new LinkedList<>();
-		cipherSuites.add(CipherSuite.TLS_RSA_WITH_3DES_EDE_CBC_SHA);
+		cipherSuites.add(context.getSelectedCipherSuite());
 		context.setClientSupportedCiphersuites(cipherSuites);
 		
 		// Set supported compression algorithms
@@ -97,11 +114,9 @@ public class TLSAttackerConnector {
 		context.setClientSupportedCompressions(compressionMethods);
 
 		// Create the transport handler that takes care of the actual network communication with the TLS implementation
-		TransportHandler transporthandler = TransportHandlerFactory.createTransportHandler(targetHostname, targetPort, context.getConfig()
-                .getConnectionEnd(), context.getConfig().getTlsTimeout(), context.getConfig().getTimeout(), context
-                .getConfig().getTransportHandlerType());
+		ConnectorTransportHandler transporthandler = new ConnectorTransportHandler(targetHostname, targetPort, context.getConfig().getConnectionEnd(), context.getConfig().getTimeout());
 		transporthandler.initialize();
-		
+
 		context.setTransportHandler(transporthandler);
         context.setRecordLayer(RecordLayerFactory.getRecordLayer(context.getConfig().getRecordLayerType(), context));
         
@@ -131,6 +146,11 @@ public class TLSAttackerConnector {
 	 * @throws IOException
 	 */
 	protected String receiveMessages() throws IOException {
+		// First check if the socket is still open
+		if(((ConnectorTransportHandler)context.getTransportHandler()).isSocketClosed()) {
+			return "ConnectionClosed";
+		}
+		
 		List<String> receivedMessages = new LinkedList<>();
 		ReceiveAction action = new ReceiveAction(new LinkedList<ProtocolMessage>());
 		
@@ -166,21 +186,54 @@ public class TLSAttackerConnector {
 	 * @throws Exception 
 	 */
 	public String processInput(String inputSymbol) throws Exception {
-		switch(inputSymbol) {
-		case "RESET":
+		// Upon receiving the special input symbol RESET, we reset the system
+		if(inputSymbol.equals("RESET")) {
 			reset();
-			return "";
-			
+			return "";			
+		}
+		
+		// Check if the socket is already closed, in which case we don't have to bother trying to send data out
+		if(((ConnectorTransportHandler)context.getTransportHandler()).isSocketClosed()) {
+			return "ConnectionClosed";
+		}
+
+		// Process the regular input symbols
+		switch(inputSymbol) {
 		case "ClientHello":
-			sendMessage(new ClientHelloMessage());
+			ClientHelloMessage clientHello = new ClientHelloMessage();
+			ModifiableByteArray cipherSuites = new ModifiableByteArray();
+			cipherSuites.setModification(ByteArrayModificationFactory.explicitValue(context.getSelectedCipherSuite().getByteValue()));
+			clientHello.setCipherSuites(cipherSuites);
+			sendMessage(clientHello);
 			break;
 			
 		case "ServerHello":
 			sendMessage(new ServerHelloMessage());
 			break;			
 			
+		case "Certificate":
+			sendMessage(new CertificateMessage());
+			break;
+			
+		case "CertificateRequest":
+			sendMessage(new CertificateRequestMessage());
+			break;
+			
+		case "DHEServerKeyExchange":
+			sendMessage(new DHEServerKeyExchangeMessage());
+			break;
+			
+		case "ServerHelloDone":
+			sendMessage(new ServerHelloDoneMessage());
+			break;
+		
 		case "RSAClientKeyExchange":
 			sendMessage(new RSAClientKeyExchangeMessage());
+			break;
+
+		case "DHClientKeyExchange":
+			//TODO Supply DH PublicKey in case none is provided by the server
+			sendMessage(new DHClientKeyExchangeMessage());
 			break;
 			
 		case "ChangeCipherSpec":
@@ -194,7 +247,7 @@ public class TLSAttackerConnector {
 		case "ApplicationData":
 			ApplicationMessage ad = new ApplicationMessage();
 			ModifiableByteArray data = new ModifiableByteArray();
-			data.setModification(ByteArrayModificationFactory.explicitValue("GET / HTTP/1.0\n".getBytes())); 
+			data.setModification(ByteArrayModificationFactory.explicitValue("GET / HTTP/1.0\n".getBytes()));
 			ad.setData(data);
 			
 			sendMessage(ad);
@@ -215,7 +268,10 @@ public class TLSAttackerConnector {
 	 */
 	public void startListening(int port) throws Exception {
 		ServerSocket serverSocket = new ServerSocket(port);
+		System.out.println("Listening on port " + port);
+		
 	    Socket clientSocket = serverSocket.accept();
+	    clientSocket.setTcpNoDelay(true);
 		
 	    PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
 	    BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
@@ -223,10 +279,10 @@ public class TLSAttackerConnector {
 	    String input, output;
 	    
 	    while((input = in.readLine()) != null) {
-	    	System.out.println("Received input: " + input);
 	        output = processInput(input);
-	        System.out.println("Responding with output: " + output);
+	        System.out.println(input + " / " + output);
 	        out.println(output);
+	        out.flush();
 	    }	    
 	    
 	    clientSocket.close();
@@ -237,10 +293,17 @@ public class TLSAttackerConnector {
 		try {
 			TLSAttackerConnector connector = new TLSAttackerConnector();
 			connector.startListening(4444);
-/*
-			System.out.println("ServerHello: " + connector.processInput("ServerHello"));				
+			
+			//System.out.println("ServerHello: " + connector.processInput("ServerHello"));
+			//System.out.println("Certificate: " + connector.processInput("Certificate"));
+			//System.out.println("CertificateRequest: " + connector.processInput("CertificateRequest"));
+			//System.out.println("DHEServerKeyExchange: " + connector.processInput("DHEServerKeyExchange"));
+			//System.out.println("ServerHelloDone: " + connector.processInput("ServerHelloDone"));
+			
+			/*
 			System.out.println("ClientHello: " + connector.processInput("ClientHello"));
 			System.out.println("RSAClientKeyExchange: " + connector.processInput("RSAClientKeyExchange"));
+			//System.out.println("DHClientKeyExchange: " + connector.processInput("DHClientKeyExchange"));
 			System.out.println("ChangeCipherSpec: " + connector.processInput("ChangeCipherSpec"));
 			System.out.println("Finished: " + connector.processInput("Finished"));
 			System.out.println("ApplicationData: " + connector.processInput("ApplicationData"));
