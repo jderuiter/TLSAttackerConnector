@@ -1,12 +1,8 @@
 package nl.cypherpunk.tlsattackerconnector;
 
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -22,9 +18,26 @@ import org.apache.logging.log4j.core.config.LoggerConfig;
 import org.bouncycastle.crypto.tls.AlertDescription;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
-import de.rub.nds.modifiablevariable.bytearray.*;
-import de.rub.nds.tlsattacker.core.constants.*;
-import de.rub.nds.tlsattacker.core.protocol.message.*;
+import de.rub.nds.modifiablevariable.bytearray.ByteArrayModificationFactory;
+import de.rub.nds.modifiablevariable.bytearray.ModifiableByteArray;
+import de.rub.nds.tlsattacker.core.constants.AlertLevel;
+import de.rub.nds.tlsattacker.core.constants.CipherSuite;
+import de.rub.nds.tlsattacker.core.constants.CompressionMethod;
+import de.rub.nds.tlsattacker.core.constants.ProtocolMessageType;
+import de.rub.nds.tlsattacker.core.constants.ProtocolVersion;
+import de.rub.nds.tlsattacker.core.protocol.message.AlertMessage;
+import de.rub.nds.tlsattacker.core.protocol.message.ApplicationMessage;
+import de.rub.nds.tlsattacker.core.protocol.message.CertificateMessage;
+import de.rub.nds.tlsattacker.core.protocol.message.CertificateRequestMessage;
+import de.rub.nds.tlsattacker.core.protocol.message.ChangeCipherSpecMessage;
+import de.rub.nds.tlsattacker.core.protocol.message.ClientHelloMessage;
+import de.rub.nds.tlsattacker.core.protocol.message.DHClientKeyExchangeMessage;
+import de.rub.nds.tlsattacker.core.protocol.message.DHEServerKeyExchangeMessage;
+import de.rub.nds.tlsattacker.core.protocol.message.FinishedMessage;
+import de.rub.nds.tlsattacker.core.protocol.message.ProtocolMessage;
+import de.rub.nds.tlsattacker.core.protocol.message.RSAClientKeyExchangeMessage;
+import de.rub.nds.tlsattacker.core.protocol.message.ServerHelloDoneMessage;
+import de.rub.nds.tlsattacker.core.protocol.message.ServerHelloMessage;
 import de.rub.nds.tlsattacker.core.record.layer.RecordLayerFactory;
 import de.rub.nds.tlsattacker.core.workflow.TlsConfig;
 import de.rub.nds.tlsattacker.core.workflow.TlsContext;
@@ -32,9 +45,6 @@ import de.rub.nds.tlsattacker.core.workflow.action.ReceiveAction;
 import de.rub.nds.tlsattacker.core.workflow.action.SendAction;
 import de.rub.nds.tlsattacker.core.workflow.action.executor.ActionExecutor;
 import de.rub.nds.tlsattacker.core.workflow.action.executor.ActionExecutorFactory;
-import de.rub.nds.tlsattacker.transport.SimpleTransportHandler;
-import de.rub.nds.tlsattacker.transport.TransportHandler;
-import de.rub.nds.tlsattacker.transport.TransportHandlerFactory;
 
 /**
  * @author Joeri de Ruiter (joeri@cs.ru.nl)
@@ -114,7 +124,7 @@ public class TLSAttackerConnector {
 		context.setClientSupportedCompressions(compressionMethods);
 
 		// Create the transport handler that takes care of the actual network communication with the TLS implementation
-		ConnectorTransportHandler transporthandler = new ConnectorTransportHandler(targetHostname, targetPort, context.getConfig().getConnectionEnd(), context.getConfig().getTimeout());
+		ConnectorTransportHandler transporthandler = new ConnectorTransportHandler(targetHostname, targetPort, context.getConfig().getConnectionEndType(), context.getConfig().getTimeout());
 		transporthandler.initialize();
 
 		context.setTransportHandler(transporthandler);
@@ -292,7 +302,7 @@ public class TLSAttackerConnector {
 	public static void main(String[] args) {
 		try {
 			TLSAttackerConnector connector = new TLSAttackerConnector();
-			connector.startListening(4444);
+//			connector.startListening(4444);
 			
 			//System.out.println("ServerHello: " + connector.processInput("ServerHello"));
 			//System.out.println("Certificate: " + connector.processInput("Certificate"));
@@ -300,14 +310,14 @@ public class TLSAttackerConnector {
 			//System.out.println("DHEServerKeyExchange: " + connector.processInput("DHEServerKeyExchange"));
 			//System.out.println("ServerHelloDone: " + connector.processInput("ServerHelloDone"));
 			
-			/*
+
 			System.out.println("ClientHello: " + connector.processInput("ClientHello"));
 			System.out.println("RSAClientKeyExchange: " + connector.processInput("RSAClientKeyExchange"));
 			//System.out.println("DHClientKeyExchange: " + connector.processInput("DHClientKeyExchange"));
 			System.out.println("ChangeCipherSpec: " + connector.processInput("ChangeCipherSpec"));
 			System.out.println("Finished: " + connector.processInput("Finished"));
 			System.out.println("ApplicationData: " + connector.processInput("ApplicationData"));
-*/
+
 		} catch(Exception e) {
 			System.err.println("Error occured: " + e.getMessage());
 			e.printStackTrace(System.err);

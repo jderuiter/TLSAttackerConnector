@@ -12,7 +12,7 @@ package nl.cypherpunk.tlsattackerconnector;
  */
 
 import de.rub.nds.modifiablevariable.util.ArrayConverter;
-import de.rub.nds.tlsattacker.transport.ConnectionEnd;
+import de.rub.nds.tlsattacker.transport.ConnectionEndType;
 import de.rub.nds.tlsattacker.transport.TransportHandler;
 
 import java.io.BufferedInputStream;
@@ -41,15 +41,13 @@ public class ConnectorTransportHandler extends TransportHandler {
 
     private BufferedInputStream bis;
 
-    private byte[] readTimingData;
-
-    public ConnectorTransportHandler(String hostname, int port, ConnectionEnd end, int socketTimeout) {
+    public ConnectorTransportHandler(String hostname, int port, ConnectionEndType end, int socketTimeout) {
         super(hostname, port, end, socketTimeout);
     }
 
     @Override
     public void initialize() throws IOException {
-        if (end == ConnectionEnd.SERVER) {
+        if (end == ConnectionEndType.SERVER) {
             serverSocket = new ServerSocket(port);
             LOGGER.info("Starting ServerTransportHandler on Port:" + port);
             isServer = true;
