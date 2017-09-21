@@ -136,7 +136,7 @@ public class TLSAttackerConnector {
 	/**
 	 * Send the provided message to the TLS implementation
 	 * 
-	 * @param message Message to be sent
+	 * @param message ProtocolMessage to be sent
 	 */
 	protected void sendMessage(ProtocolMessage message) {
 		List<ProtocolMessage> messages = new LinkedList<>();
