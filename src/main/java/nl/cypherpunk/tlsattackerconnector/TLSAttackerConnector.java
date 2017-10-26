@@ -11,20 +11,15 @@ import java.util.LinkedList;
 import java.util.List;
 
 import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.core.LoggerContext;
-import org.apache.logging.log4j.core.config.Configuration;
-import org.apache.logging.log4j.core.config.LoggerConfig;
+import org.apache.logging.log4j.core.config.Configurator;
 import org.bouncycastle.crypto.tls.AlertDescription;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 import de.rub.nds.modifiablevariable.bytearray.ByteArrayModificationFactory;
 import de.rub.nds.modifiablevariable.bytearray.ModifiableByteArray;
+import de.rub.nds.tlsattacker.core.config.Config;
 import de.rub.nds.tlsattacker.core.constants.AlertLevel;
-import de.rub.nds.tlsattacker.core.constants.CipherSuite;
-import de.rub.nds.tlsattacker.core.constants.CompressionMethod;
 import de.rub.nds.tlsattacker.core.constants.ProtocolMessageType;
-import de.rub.nds.tlsattacker.core.constants.ProtocolVersion;
 import de.rub.nds.tlsattacker.core.protocol.message.AlertMessage;
 import de.rub.nds.tlsattacker.core.protocol.message.ApplicationMessage;
 import de.rub.nds.tlsattacker.core.protocol.message.CertificateMessage;
@@ -38,22 +33,25 @@ import de.rub.nds.tlsattacker.core.protocol.message.ProtocolMessage;
 import de.rub.nds.tlsattacker.core.protocol.message.RSAClientKeyExchangeMessage;
 import de.rub.nds.tlsattacker.core.protocol.message.ServerHelloDoneMessage;
 import de.rub.nds.tlsattacker.core.protocol.message.ServerHelloMessage;
-import de.rub.nds.tlsattacker.core.record.layer.RecordLayerFactory;
-import de.rub.nds.tlsattacker.core.workflow.TlsConfig;
-import de.rub.nds.tlsattacker.core.workflow.TlsContext;
+import de.rub.nds.tlsattacker.core.state.State;
+import de.rub.nds.tlsattacker.core.state.TlsContext;
+import de.rub.nds.tlsattacker.core.workflow.WorkflowTrace;
 import de.rub.nds.tlsattacker.core.workflow.action.ReceiveAction;
 import de.rub.nds.tlsattacker.core.workflow.action.SendAction;
-import de.rub.nds.tlsattacker.core.workflow.action.executor.ActionExecutor;
-import de.rub.nds.tlsattacker.core.workflow.action.executor.ActionExecutorFactory;
+import de.rub.nds.tlsattacker.transport.ClientConnectionEnd;
+import de.rub.nds.tlsattacker.transport.TransportHandler;
+import de.rub.nds.tlsattacker.transport.TransportHandlerFactory;
+import de.rub.nds.tlsattacker.util.UnlimitedStrengthEnabler;
 
 /**
  * @author Joeri de Ruiter (joeri@cs.ru.nl)
  *
  */
 public class TLSAttackerConnector {
-	TlsConfig config;
-	TlsContext context;
-	ActionExecutor executor;
+	static String CONNECTION_CLOSED = "ConnectionClosed";
+	
+	Config config;
+	State state;
 	
 	String targetHostname = "localhost";
 	int targetPort = 4433;
@@ -66,19 +64,44 @@ public class TLSAttackerConnector {
 	public TLSAttackerConnector() throws IOException {
 		// Add BouncyCastle, otherwise encryption will be invalid and it's not possible to perform a valid handshake
 		Security.addProvider(new BouncyCastleProvider());
+		UnlimitedStrengthEnabler.enable();
 		
 		// Disable logging
-		LoggerContext loggerContext = (LoggerContext) LogManager.getContext(false);
-		Configuration ctxConfig = loggerContext.getConfiguration();
-		LoggerConfig loggerConfig = ctxConfig.getLoggerConfig(LogManager.ROOT_LOGGER_NAME);
-		loggerConfig.setLevel(Level.OFF); 
-		
-		config = TlsConfig.createConfig();
-		//config.setHost("localhost:4433");
-		config.setHighestProtocolVersion(ProtocolVersion.TLS12);
-		// Timeout that is used when waiting for incoming messages
-		config.setTimeout(100);
+		Configurator.setAllLevels("de.rub.nds.tlsattacker", Level.OFF);
 
+		// Configure TLS-Attacker
+		config = Config.createConfig();
+		config.setEnforceSettings(false);
+		
+		// Configure hosts
+		config.clearConnectionEnds();
+		ClientConnectionEnd connectionEnd = new ClientConnectionEnd();
+		connectionEnd.setHostname(targetHostname);
+		connectionEnd.setPort(targetPort);
+		config.addConnectionEnd(connectionEnd);
+		
+		// Timeout that is used when waiting for incoming messages
+		config.setDefaultTimeout(100);		
+		
+		// TLS specific settings
+		//config.setHighestProtocolVersion(ProtocolVersion.TLS12);
+		// Set initial configuration to support out of order messages
+		//config.setDefaultSelectedCipherSuite(CipherSuite.TLS_RSA_WITH_3DES_EDE_CBC_SHA);
+		//config.setDefaultSelectedCipherSuite(CipherSuite.TLS_DHE_RSA_WITH_AES_128_CBC_SHA256);
+		//config.setDefaultSelectedProtocolVersion(ProtocolVersion.TLS12);
+		//config.setDefaultHighestClientProtocolVersion(ProtocolVersion.TLS12);
+		
+		// Create the list of supported cipher suites
+		//List<CipherSuite> cipherSuites = new LinkedList<>();
+		//cipherSuites.add(config.getDefaultSelectedCipherSuite());
+		//config.setDefaultClientSupportedCiphersuites(cipherSuites);
+		
+		// Set supported compression algorithms
+		//List<CompressionMethod> compressionMethods = new LinkedList<>();	
+		//compressionMethods.add(CompressionMethod.NULL);
+		//config.setDefaultClientSupportedCompressionMethods(compressionMethods);
+		
+		
 		initialise();
 	}
 	
@@ -94,9 +117,10 @@ public class TLSAttackerConnector {
 	
 	/**
 	 * Close the current connection
+	 * @throws IOException 
 	 */
-	public void close() {
-		context.getTransportHandler().closeConnection();
+	public void close() throws IOException {
+		state.getTlsContext().getTransportHandler().closeConnection();
 	}	
 	
 	/**
@@ -105,32 +129,17 @@ public class TLSAttackerConnector {
 	 * @throws IOException
 	 */
 	public void initialise() throws IOException {
-		context = new TlsContext(config);
-		
-		// Set initial configuration to support out of order messages
-		context.setSelectedCipherSuite(CipherSuite.TLS_RSA_WITH_3DES_EDE_CBC_SHA);
-		//context.setSelectedCipherSuite(CipherSuite.TLS_DHE_RSA_WITH_AES_128_CBC_SHA256);
-		context.setSelectedProtocolVersion(ProtocolVersion.TLS12);
-		context.setHighestClientProtocolVersion(ProtocolVersion.TLS12);
-		
-		// Create the list of supported cipher suites
-		List<CipherSuite> cipherSuites = new LinkedList<>();
-		cipherSuites.add(context.getSelectedCipherSuite());
-		context.setClientSupportedCiphersuites(cipherSuites);
-		
-		// Set supported compression algorithms
-		List<CompressionMethod> compressionMethods = new LinkedList<>();	
-		compressionMethods.add(CompressionMethod.NULL);
-		context.setClientSupportedCompressions(compressionMethods);
+		WorkflowTrace trace = new WorkflowTrace(config);
+		state = new State(config, trace);
 
-		// Create the transport handler that takes care of the actual network communication with the TLS implementation
-		ConnectorTransportHandler transporthandler = new ConnectorTransportHandler(targetHostname, targetPort, context.getConfig().getConnectionEndType(), context.getConfig().getTimeout());
-		transporthandler.initialize();
-
+		TlsContext context = state.getTlsContext();
+		
+		TransportHandler transporthandler = TransportHandlerFactory.createTransportHandler(config.getConnectionEnd());
+		//ConnectorTransportHandler transporthandler = new ConnectorTransportHandler(context.getConfig().getDefaultTimeout(), config.getConnectionEnd().getHostname(), config.getConnectionEnd().getPort());
 		context.setTransportHandler(transporthandler);
-        context.setRecordLayer(RecordLayerFactory.getRecordLayer(context.getConfig().getRecordLayerType(), context));
-        
-        executor = ActionExecutorFactory.getActionExecutor(context.getConfig().getExecutorType(), context);		
+		
+		context.initTransportHandler();
+        context.initRecordLayer();
 	}
 	
 	/**
@@ -141,11 +150,12 @@ public class TLSAttackerConnector {
 	protected void sendMessage(ProtocolMessage message) {
 		List<ProtocolMessage> messages = new LinkedList<>();
 		messages.add(message);
-		new SendAction(messages).execute(context, executor);
+		new SendAction(messages).execute(state);
 		
 		// If we send an CCS message, enable encryption and/or update the keys
 		if(message.getProtocolMessageType() == ProtocolMessageType.CHANGE_CIPHER_SPEC) {
-			context.getRecordLayer().updateEncryptionCipher();
+			state.getTlsContext().getRecordLayer().updateEncryptionCipher();
+			state.getTlsContext().setSequenceNumber(0);
 		}
 	}
     
@@ -157,20 +167,20 @@ public class TLSAttackerConnector {
 	 */
 	protected String receiveMessages() throws IOException {
 		// First check if the socket is still open
-		if(((ConnectorTransportHandler)context.getTransportHandler()).isSocketClosed()) {
-			return "ConnectionClosed";
+		if(state.getTlsContext().getTransportHandler().isClosed()) {
+			return CONNECTION_CLOSED;
 		}
 		
 		List<String> receivedMessages = new LinkedList<>();
 		ReceiveAction action = new ReceiveAction(new LinkedList<ProtocolMessage>());
 		
 		// Perform the actual receiving of the message
-		action.execute(context, executor);
+		action.execute(state);
 		
 		String outputMessage;
 		
 		// Iterate over all received messages and build a string containing their respective types
-		for(ProtocolMessage message: action.getActualMessages()) {
+		for(ProtocolMessage message: action.getReceivedMessages()) {
 			if(message.getProtocolMessageType() == ProtocolMessageType.ALERT) {
 				AlertMessage alert = (AlertMessage)message;
 				outputMessage = "ALERT_" + AlertLevel.getAlertLevel(alert.getLevel().getValue()).name() + "_" + AlertDescription.getName(alert.getDescription().getValue());
@@ -179,6 +189,10 @@ public class TLSAttackerConnector {
 				outputMessage = message.toCompactString();
 			}
 			receivedMessages.add(outputMessage);
+		}
+		
+		if(state.getTlsContext().getTransportHandler().isClosed()) {
+			receivedMessages.add(CONNECTION_CLOSED);
 		}
 		
 		if(receivedMessages.size() > 0) {
@@ -203,17 +217,14 @@ public class TLSAttackerConnector {
 		}
 		
 		// Check if the socket is already closed, in which case we don't have to bother trying to send data out
-		if(((ConnectorTransportHandler)context.getTransportHandler()).isSocketClosed()) {
-			return "ConnectionClosed";
+		if(state.getTlsContext().getTransportHandler().isClosed()) {
+			return CONNECTION_CLOSED;
 		}
 
 		// Process the regular input symbols
 		switch(inputSymbol) {
 		case "ClientHello":
 			ClientHelloMessage clientHello = new ClientHelloMessage();
-			ModifiableByteArray cipherSuites = new ModifiableByteArray();
-			cipherSuites.setModification(ByteArrayModificationFactory.explicitValue(context.getSelectedCipherSuite().getByteValue()));
-			clientHello.setCipherSuites(cipherSuites);
 			sendMessage(clientHello);
 			break;
 			
@@ -317,7 +328,8 @@ public class TLSAttackerConnector {
 			System.out.println("ChangeCipherSpec: " + connector.processInput("ChangeCipherSpec"));
 			System.out.println("Finished: " + connector.processInput("Finished"));
 			System.out.println("ApplicationData: " + connector.processInput("ApplicationData"));
-
+			//System.out.println("ApplicationData: " + connector.processInput("ApplicationData"));
+			//System.out.println("ApplicationData: " + connector.processInput("ApplicationData"));
 		} catch(Exception e) {
 			System.err.println("Error occured: " + e.getMessage());
 			e.printStackTrace(System.err);
