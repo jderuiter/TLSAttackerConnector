@@ -1,5 +1,8 @@
 package nl.cypherpunk.tlsattackerconnector;
 
+import com.beust.jcommander.JCommander;
+import com.beust.jcommander.Parameter;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -19,7 +22,10 @@ import de.rub.nds.modifiablevariable.bytearray.ByteArrayModificationFactory;
 import de.rub.nds.modifiablevariable.bytearray.ModifiableByteArray;
 import de.rub.nds.tlsattacker.core.config.Config;
 import de.rub.nds.tlsattacker.core.constants.AlertLevel;
+import de.rub.nds.tlsattacker.core.constants.CipherSuite;
+import de.rub.nds.tlsattacker.core.constants.CompressionMethod;
 import de.rub.nds.tlsattacker.core.constants.ProtocolMessageType;
+import de.rub.nds.tlsattacker.core.constants.ProtocolVersion;
 import de.rub.nds.tlsattacker.core.protocol.message.AlertMessage;
 import de.rub.nds.tlsattacker.core.protocol.message.ApplicationMessage;
 import de.rub.nds.tlsattacker.core.protocol.message.CertificateMessage;
@@ -28,6 +34,7 @@ import de.rub.nds.tlsattacker.core.protocol.message.ChangeCipherSpecMessage;
 import de.rub.nds.tlsattacker.core.protocol.message.ClientHelloMessage;
 import de.rub.nds.tlsattacker.core.protocol.message.DHClientKeyExchangeMessage;
 import de.rub.nds.tlsattacker.core.protocol.message.DHEServerKeyExchangeMessage;
+import de.rub.nds.tlsattacker.core.protocol.message.ECDHClientKeyExchangeMessage;
 import de.rub.nds.tlsattacker.core.protocol.message.FinishedMessage;
 import de.rub.nds.tlsattacker.core.protocol.message.ProtocolMessage;
 import de.rub.nds.tlsattacker.core.protocol.message.RSAClientKeyExchangeMessage;
@@ -48,27 +55,52 @@ import de.rub.nds.tlsattacker.util.UnlimitedStrengthEnabler;
  *
  */
 public class TLSAttackerConnector {
-	static String CONNECTION_CLOSED = "ConnectionClosed";
+	static String SYMBOL_CONNECTION_CLOSED = "ConnectionClosed";
+	static String SYMBOL_RESET = "RESET";
 	
 	Config config;
 	State state;
-	
+
+	@Parameter(names = {"--listen", "-l"}, description = "Listen port")
+	int listenPort = 6666;	
+	@Parameter(names = {"--targetHost", "-tH"}, description = "Target host")
 	String targetHostname = "localhost";
+	@Parameter(names = {"--targetPort", "-tP"}, description = "Target port")
 	int targetPort = 4433;
+	@Parameter(names = {"--timeout", "-t"}, description = "Timeout")
+	int timeout = 100;
+	
+	@Parameter(names = {"--cipherSuite", "-cS"}, description = "CipherSuite to use")
+	String cipherSuiteString = "TLS_RSA_WITH_AES_128_CBC_SHA256";
+	@Parameter(names = {"--protocolVersion", "-pV"}, description = "TLS version to use")
+	String protocolVersionString = "TLS12";
+	@Parameter(names = {"--compressionMethod", "-cM"}, description = "CompressionMethod to use")
+	String compressionMethodString = "NULL";
+	
+	@Parameter(names = {"--help", "-h"}, description = "Display help", help = true)
+	private boolean help;
+	@Parameter(names = {"--test"}, description = "Run test handshake")
+	private boolean test;
 	
 	/**
-	 * Intialise the TLS-Attacker connector
+	 * Create the TLS-Attacker connector
 	 * 
-	 * @throws IOException
 	 */
-	public TLSAttackerConnector() throws IOException {
+	public TLSAttackerConnector() {
 		// Add BouncyCastle, otherwise encryption will be invalid and it's not possible to perform a valid handshake
 		Security.addProvider(new BouncyCastleProvider());
 		UnlimitedStrengthEnabler.enable();
 		
 		// Disable logging
 		Configurator.setAllLevels("de.rub.nds.tlsattacker", Level.OFF);
-
+	}
+	
+	/**
+	 * Intialise the TLS-Attacker connector
+	 * 
+	 * @throws Exception
+	 */	
+	public void initialise() throws Exception {
 		// Configure TLS-Attacker
 		config = Config.createConfig();
 		config.setEnforceSettings(false);
@@ -81,30 +113,53 @@ public class TLSAttackerConnector {
 		config.addConnectionEnd(connectionEnd);
 		
 		// Timeout that is used when waiting for incoming messages
-		config.setDefaultTimeout(100);		
+		config.setDefaultTimeout(timeout);		
+		
+		// Parse provided CipherSuite
+		CipherSuite cipherSuite;
+		try {
+			cipherSuite = CipherSuite.valueOf(cipherSuiteString);
+		}
+		catch(java.lang.IllegalArgumentException e) {
+			throw new Exception("Unknown CipherSuite " + cipherSuiteString); 
+		}
+		
+		// Parse CompressionMethod
+		CompressionMethod compressionMethod;
+		try {
+			compressionMethod = CompressionMethod.valueOf(compressionMethodString);
+		}
+		catch(java.lang.IllegalArgumentException e) {
+			throw new Exception("Unknown CompressionMethod " + compressionMethodString); 
+		}				
 		
 		// TLS specific settings
-		//config.setHighestProtocolVersion(ProtocolVersion.TLS12);
-		// Set initial configuration to support out of order messages
-		//config.setDefaultSelectedCipherSuite(CipherSuite.TLS_RSA_WITH_3DES_EDE_CBC_SHA);
-		//config.setDefaultSelectedCipherSuite(CipherSuite.TLS_DHE_RSA_WITH_AES_128_CBC_SHA256);
-		//config.setDefaultSelectedProtocolVersion(ProtocolVersion.TLS12);
-		//config.setDefaultHighestClientProtocolVersion(ProtocolVersion.TLS12);
+		
+		// Set TLS version
+		ProtocolVersion protocolVersion = ProtocolVersion.fromString(protocolVersionString);
+		config.setHighestProtocolVersion(protocolVersion);
+		config.setDefaultSelectedProtocolVersion(protocolVersion);
+		config.setDefaultHighestClientProtocolVersion(protocolVersion);
+		
+		// Set supported CipherSuite
+		config.setDefaultSelectedCipherSuite(cipherSuite);
 		
 		// Create the list of supported cipher suites
-		//List<CipherSuite> cipherSuites = new LinkedList<>();
-		//cipherSuites.add(config.getDefaultSelectedCipherSuite());
-		//config.setDefaultClientSupportedCiphersuites(cipherSuites);
+		List<CipherSuite> cipherSuites = new LinkedList<>();
+		cipherSuites.add(config.getDefaultSelectedCipherSuite());
+		config.setDefaultClientSupportedCiphersuites(cipherSuites);
 		
 		// Set supported compression algorithms
-		//List<CompressionMethod> compressionMethods = new LinkedList<>();	
-		//compressionMethods.add(CompressionMethod.NULL);
-		//config.setDefaultClientSupportedCompressionMethods(compressionMethods);
+		List<CompressionMethod> compressionMethods = new LinkedList<>();	
+		compressionMethods.add(compressionMethod);
+		config.setDefaultClientSupportedCompressionMethods(compressionMethods);
+
+		//
+		config.setAddRenegotiationInfoExtension(true);
 		
-		
-		initialise();
+		initialiseSession();		
 	}
-	
+
 	/**
 	 * Reset the connection with the TLS implementation by closing the current socket and initialising a new session
 	 * 
@@ -112,7 +167,7 @@ public class TLSAttackerConnector {
 	 */
 	public void reset() throws IOException {
 		close();
-		initialise();
+		initialiseSession();
 	}
 	
 	/**
@@ -128,14 +183,14 @@ public class TLSAttackerConnector {
 	 * 
 	 * @throws IOException
 	 */
-	public void initialise() throws IOException {
+	public void initialiseSession() throws IOException {
 		WorkflowTrace trace = new WorkflowTrace(config);
 		state = new State(config, trace);
 
 		TlsContext context = state.getTlsContext();
 		
-		TransportHandler transporthandler = TransportHandlerFactory.createTransportHandler(config.getConnectionEnd());
-		//ConnectorTransportHandler transporthandler = new ConnectorTransportHandler(context.getConfig().getDefaultTimeout(), config.getConnectionEnd().getHostname(), config.getConnectionEnd().getPort());
+		//TransportHandler transporthandler = TransportHandlerFactory.createTransportHandler(config.getConnectionEnd());
+		ConnectorTransportHandler transporthandler = new ConnectorTransportHandler(context.getConfig().getDefaultTimeout(), config.getConnectionEnd().getHostname(), config.getConnectionEnd().getPort());
 		context.setTransportHandler(transporthandler);
 		
 		context.initTransportHandler();
@@ -151,12 +206,6 @@ public class TLSAttackerConnector {
 		List<ProtocolMessage> messages = new LinkedList<>();
 		messages.add(message);
 		new SendAction(messages).execute(state);
-		
-		// If we send an CCS message, enable encryption and/or update the keys
-		if(message.getProtocolMessageType() == ProtocolMessageType.CHANGE_CIPHER_SPEC) {
-			state.getTlsContext().getRecordLayer().updateEncryptionCipher();
-			state.getTlsContext().setSequenceNumber(0);
-		}
 	}
     
 	/**
@@ -168,7 +217,7 @@ public class TLSAttackerConnector {
 	protected String receiveMessages() throws IOException {
 		// First check if the socket is still open
 		if(state.getTlsContext().getTransportHandler().isClosed()) {
-			return CONNECTION_CLOSED;
+			return SYMBOL_CONNECTION_CLOSED;
 		}
 		
 		List<String> receivedMessages = new LinkedList<>();
@@ -192,7 +241,7 @@ public class TLSAttackerConnector {
 		}
 		
 		if(state.getTlsContext().getTransportHandler().isClosed()) {
-			receivedMessages.add(CONNECTION_CLOSED);
+			receivedMessages.add(SYMBOL_CONNECTION_CLOSED);
 		}
 		
 		if(receivedMessages.size() > 0) {
@@ -211,21 +260,20 @@ public class TLSAttackerConnector {
 	 */
 	public String processInput(String inputSymbol) throws Exception {
 		// Upon receiving the special input symbol RESET, we reset the system
-		if(inputSymbol.equals("RESET")) {
+		if(inputSymbol.equals(SYMBOL_RESET)) {
 			reset();
 			return "";			
 		}
 		
 		// Check if the socket is already closed, in which case we don't have to bother trying to send data out
 		if(state.getTlsContext().getTransportHandler().isClosed()) {
-			return CONNECTION_CLOSED;
+			return SYMBOL_CONNECTION_CLOSED;
 		}
 
 		// Process the regular input symbols
 		switch(inputSymbol) {
 		case "ClientHello":
-			ClientHelloMessage clientHello = new ClientHelloMessage();
-			sendMessage(clientHello);
+			sendMessage(new ClientHelloMessage());
 			break;
 			
 		case "ServerHello":
@@ -253,8 +301,11 @@ public class TLSAttackerConnector {
 			break;
 
 		case "DHClientKeyExchange":
-			//TODO Supply DH PublicKey in case none is provided by the server
 			sendMessage(new DHClientKeyExchangeMessage());
+			break;
+			
+		case "ECDHClientKeyExchange":
+			sendMessage(new ECDHClientKeyExchangeMessage());
 			break;
 			
 		case "ChangeCipherSpec":
@@ -275,7 +326,7 @@ public class TLSAttackerConnector {
 			break;
 		
 		default:
-			throw new Exception("Unknown input symbol");
+			throw new Exception("Unknown input symbol: " + inputSymbol);
 		}
 		
 		return receiveMessages();
@@ -284,12 +335,11 @@ public class TLSAttackerConnector {
 	/**
 	 * Start listening on the provided to port for a connection to provide input symbols and return output symbols. Only one connection is accepted at the moment.
 	 * 
-	 * @param port The port to listen on
 	 * @throws Exception 
 	 */
-	public void startListening(int port) throws Exception {
-		ServerSocket serverSocket = new ServerSocket(port);
-		System.out.println("Listening on port " + port);
+	public void startListening() throws Exception {
+		ServerSocket serverSocket = new ServerSocket(listenPort);
+		System.out.println("Listening on port " + listenPort);
 		
 	    Socket clientSocket = serverSocket.accept();
 	    clientSocket.setTcpNoDelay(true);
@@ -310,26 +360,42 @@ public class TLSAttackerConnector {
 	    serverSocket.close();
 	}
 	
-	public static void main(String[] args) {
+	public static void main(String ... argv) {
 		try {
 			TLSAttackerConnector connector = new TLSAttackerConnector();
-//			connector.startListening(4444);
 			
-			//System.out.println("ServerHello: " + connector.processInput("ServerHello"));
-			//System.out.println("Certificate: " + connector.processInput("Certificate"));
-			//System.out.println("CertificateRequest: " + connector.processInput("CertificateRequest"));
-			//System.out.println("DHEServerKeyExchange: " + connector.processInput("DHEServerKeyExchange"));
-			//System.out.println("ServerHelloDone: " + connector.processInput("ServerHelloDone"));
-			
+			// Parse commandline arguments
+	        JCommander commander = JCommander.newBuilder()
+	        .addObject(connector)
+            .build();
+            commander.parse(argv);			
 
-			System.out.println("ClientHello: " + connector.processInput("ClientHello"));
-			System.out.println("RSAClientKeyExchange: " + connector.processInput("RSAClientKeyExchange"));
-			//System.out.println("DHClientKeyExchange: " + connector.processInput("DHClientKeyExchange"));
-			System.out.println("ChangeCipherSpec: " + connector.processInput("ChangeCipherSpec"));
-			System.out.println("Finished: " + connector.processInput("Finished"));
-			System.out.println("ApplicationData: " + connector.processInput("ApplicationData"));
-			//System.out.println("ApplicationData: " + connector.processInput("ApplicationData"));
-			//System.out.println("ApplicationData: " + connector.processInput("ApplicationData"));
+            if (connector.help) {
+                commander.usage();
+                return;
+            }
+            
+            // Initialise the connector after the arguments are set
+            connector.initialise();
+            
+            if(connector.test) {
+    			System.out.println("ClientHello: " + connector.processInput("ClientHello"));
+
+    			CipherSuite selectedCipherSuite = connector.state.getTlsContext().getSelectedCipherSuite();
+    			if(selectedCipherSuite.name().contains("ECDH_")) {
+        			System.out.println("ECDHClientKeyExchange: " + connector.processInput("ECDHClientKeyExchange"));    				
+    			} else if(selectedCipherSuite.name().contains("DH_")) {
+        			System.out.println("DHClientKeyExchange: " + connector.processInput("DHClientKeyExchange"));
+    			} else if(selectedCipherSuite.name().contains("RSA_")) {
+    				System.out.println("RSAClientKeyExchange: " + connector.processInput("RSAClientKeyExchange"));    				
+    			}
+    			System.out.println("ChangeCipherSpec: " + connector.processInput("ChangeCipherSpec"));
+    			System.out.println("Finished: " + connector.processInput("Finished"));
+    			System.out.println("ApplicationData: " + connector.processInput("ApplicationData"));
+            	return;
+            }
+
+			connector.startListening();
 		} catch(Exception e) {
 			System.err.println("Error occured: " + e.getMessage());
 			e.printStackTrace(System.err);
