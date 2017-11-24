@@ -1,5 +1,6 @@
 package nl.cypherpunk.tlsattackerconnector;
 
+import com.beust.jcommander.IDefaultProvider;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 
@@ -10,6 +11,7 @@ import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.security.Security;
+import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -70,8 +72,9 @@ public class TLSAttackerConnector {
 	@Parameter(names = {"--timeout", "-t"}, description = "Timeout")
 	int timeout = 100;
 	
-	@Parameter(names = {"--cipherSuite", "-cS"}, description = "CipherSuite to use")
-	String cipherSuiteString = "TLS_RSA_WITH_AES_128_CBC_SHA256";
+	@Parameter(names = {"--cipherSuite", "-cS"}, description = "Comma-separated list of ciphersuites to use. If none is provided this will default to TLS_RSA_WITH_AES_128_CBC_SHA256.")
+	List<String> cipherSuiteStrings = new ArrayList<>();
+	
 	@Parameter(names = {"--protocolVersion", "-pV"}, description = "TLS version to use")
 	String protocolVersionString = "TLS12";
 	@Parameter(names = {"--compressionMethod", "-cM"}, description = "CompressionMethod to use")
@@ -81,6 +84,8 @@ public class TLSAttackerConnector {
 	private boolean help;
 	@Parameter(names = {"--test"}, description = "Run test handshake")
 	private boolean test;
+	@Parameter(names = {"--testCipherSuites"}, description = "Try to determine which CipherSuites are supported")
+	private boolean testCipherSuites;
 	
 	/**
 	 * Create the TLS-Attacker connector
@@ -115,15 +120,21 @@ public class TLSAttackerConnector {
 		// Timeout that is used when waiting for incoming messages
 		config.setDefaultTimeout(timeout);		
 		
-		// Parse provided CipherSuite
-		CipherSuite cipherSuite;
-		try {
-			cipherSuite = CipherSuite.valueOf(cipherSuiteString);
+		// Parse provided CipherSuite		
+		List<CipherSuite> cipherSuites = new LinkedList<>();
+		for(String cipherSuiteString: cipherSuiteStrings) {
+			try {
+				cipherSuites.add(CipherSuite.valueOf(cipherSuiteString));
+			}
+			catch(java.lang.IllegalArgumentException e) {
+				throw new Exception("Unknown CipherSuite " + cipherSuiteString);
+			}	
 		}
-		catch(java.lang.IllegalArgumentException e) {
-			throw new Exception("Unknown CipherSuite " + cipherSuiteString); 
+		// If no CipherSuites are provided, set the default
+		if(cipherSuites.size() == 0) {
+			cipherSuites.add(CipherSuite.TLS_RSA_WITH_AES_128_CBC_SHA256);
 		}
-		
+	
 		// Parse CompressionMethod
 		CompressionMethod compressionMethod;
 		try {
@@ -141,21 +152,16 @@ public class TLSAttackerConnector {
 		config.setDefaultSelectedProtocolVersion(protocolVersion);
 		config.setDefaultHighestClientProtocolVersion(protocolVersion);
 		
-		// Set supported CipherSuite
-		config.setDefaultSelectedCipherSuite(cipherSuite);
+		// Set default selected CipherSuite. This will be the first in the list of specified CipherSuites, which will always contain at least one element
+		config.setDefaultSelectedCipherSuite(cipherSuites.get(0));
 		
-		// Create the list of supported cipher suites
-		List<CipherSuite> cipherSuites = new LinkedList<>();
-		cipherSuites.add(config.getDefaultSelectedCipherSuite());
+		// Set the list of supported cipher suites
 		config.setDefaultClientSupportedCiphersuites(cipherSuites);
 		
 		// Set supported compression algorithms
 		List<CompressionMethod> compressionMethods = new LinkedList<>();	
 		compressionMethods.add(compressionMethod);
 		config.setDefaultClientSupportedCompressionMethods(compressionMethods);
-
-		//
-		config.setAddRenegotiationInfoExtension(true);
 		
 		initialiseSession();		
 	}
@@ -382,17 +388,31 @@ public class TLSAttackerConnector {
     			System.out.println("ClientHello: " + connector.processInput("ClientHello"));
 
     			CipherSuite selectedCipherSuite = connector.state.getTlsContext().getSelectedCipherSuite();
-    			if(selectedCipherSuite.name().contains("ECDH_")) {
+    			if(selectedCipherSuite == null) {
+    				System.out.println("RSAClientKeyExchange: " + connector.processInput("RSAClientKeyExchange"));
+    			}
+    			else if(selectedCipherSuite.name().contains("ECDH")) {
         			System.out.println("ECDHClientKeyExchange: " + connector.processInput("ECDHClientKeyExchange"));    				
-    			} else if(selectedCipherSuite.name().contains("DH_")) {
+    			} else if(selectedCipherSuite.name().contains("DH")) {
         			System.out.println("DHClientKeyExchange: " + connector.processInput("DHClientKeyExchange"));
-    			} else if(selectedCipherSuite.name().contains("RSA_")) {
+    			} else if(selectedCipherSuite.name().contains("RSA")) {
     				System.out.println("RSAClientKeyExchange: " + connector.processInput("RSAClientKeyExchange"));    				
     			}
     			System.out.println("ChangeCipherSpec: " + connector.processInput("ChangeCipherSpec"));
     			System.out.println("Finished: " + connector.processInput("Finished"));
     			System.out.println("ApplicationData: " + connector.processInput("ApplicationData"));
             	return;
+            }
+            else if(connector.testCipherSuites) {
+                for(CipherSuite cs: CipherSuite.values()) {
+                	List<CipherSuite> cipherSuites = new ArrayList<>();
+                	cipherSuites.add(cs);
+            		connector.config.setDefaultSelectedCipherSuite(cs);
+            		connector.config.setDefaultClientSupportedCiphersuites(cipherSuites);            		
+            		
+                	connector.processInput("RESET");
+                	System.out.println(cs.name() + " " + connector.processInput("ClientHello"));
+                }
             }
 
 			connector.startListening();
