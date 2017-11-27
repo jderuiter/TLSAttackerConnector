@@ -8,6 +8,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
+import java.math.BigInteger;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.security.Security;
@@ -162,6 +163,14 @@ public class TLSAttackerConnector {
 		List<CompressionMethod> compressionMethods = new LinkedList<>();	
 		compressionMethods.add(compressionMethod);
 		config.setDefaultClientSupportedCompressionMethods(compressionMethods);
+		
+		// Set default DH parameters
+		config.setDefaultDhGenerator(new BigInteger("2"));
+		config.setDefaultDhModulus(new BigInteger("6668014432879854274002278852208614463049243575172486268847999412414761893973482255240669516874141524239224030057949495697186951824868185545819975637245503840103415249493026666167468715286478870340074507098367006866803177055300900777576918011"));
+		config.setDefaultClientDhPrivateKey(new BigInteger("30757838539894352412510553993926388250692636687493810307136098911018166940950"));
+		config.setDefaultClientDhPublicKey(new BigInteger("6668014432879854274002278852208614463049243575172486268847999412414761893973482255240669516874141524239224030057949495697186951824868185545819975637245503840103415249493026666167468715286478870340074507098367006866803177055300900777576918011"));
+		config.setDefaultServerDhPrivateKey(new BigInteger("440051d6f0b55ea967ab31c68a8b5e37d910dae0e2d459a486459caadf367516"));
+		config.setDefaultServerDhPublicKey(new BigInteger("6668014432879854274002278852208614463049243575172486268847999412414761893973482255240669516874141524239224030057949495697186951824868185545819975637245503840103415249493026666167468715286478870340074507098367006866803177055300900777576918011"));
 		
 		initialiseSession();		
 	}
@@ -401,7 +410,6 @@ public class TLSAttackerConnector {
     			System.out.println("ChangeCipherSpec: " + connector.processInput("ChangeCipherSpec"));
     			System.out.println("Finished: " + connector.processInput("Finished"));
     			System.out.println("ApplicationData: " + connector.processInput("ApplicationData"));
-            	return;
             }
             else if(connector.testCipherSuites) {
                 for(CipherSuite cs: CipherSuite.values()) {
@@ -413,9 +421,9 @@ public class TLSAttackerConnector {
                 	connector.processInput("RESET");
                 	System.out.println(cs.name() + " " + connector.processInput("ClientHello"));
                 }
+            } else {
+            	connector.startListening();
             }
-
-			connector.startListening();
 		} catch(Exception e) {
 			System.err.println("Error occured: " + e.getMessage());
 			e.printStackTrace(System.err);
