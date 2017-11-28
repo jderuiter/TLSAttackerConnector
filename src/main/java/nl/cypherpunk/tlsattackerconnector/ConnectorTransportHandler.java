@@ -11,18 +11,12 @@ package nl.cypherpunk.tlsattackerconnector;
  * http://www.apache.org/licenses/LICENSE-2.0
  */
 
-import de.rub.nds.modifiablevariable.util.ArrayConverter;
-import de.rub.nds.tlsattacker.transport.ConnectionEndType;
-import de.rub.nds.tlsattacker.transport.TransportHandler;
 import de.rub.nds.tlsattacker.transport.tcp.ClientTcpNoDelayTransportHandler;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
 

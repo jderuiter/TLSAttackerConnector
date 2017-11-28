@@ -1,6 +1,5 @@
 package nl.cypherpunk.tlsattackerconnector;
 
-import com.beust.jcommander.IDefaultProvider;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 
@@ -19,16 +18,16 @@ import java.util.List;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.core.config.Configurator;
 import org.bouncycastle.crypto.tls.AlertDescription;
-import org.bouncycastle.crypto.tls.TlsExtensionsUtils;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 import de.rub.nds.modifiablevariable.bytearray.ByteArrayModificationFactory;
 import de.rub.nds.modifiablevariable.bytearray.ModifiableByteArray;
 import de.rub.nds.tlsattacker.core.config.Config;
+import de.rub.nds.tlsattacker.core.connection.AliasedConnection;
+import de.rub.nds.tlsattacker.core.connection.OutboundConnection;
 import de.rub.nds.tlsattacker.core.constants.AlertLevel;
 import de.rub.nds.tlsattacker.core.constants.CipherSuite;
 import de.rub.nds.tlsattacker.core.constants.CompressionMethod;
-import de.rub.nds.tlsattacker.core.constants.ExtensionType;
 import de.rub.nds.tlsattacker.core.constants.ProtocolMessageType;
 import de.rub.nds.tlsattacker.core.constants.ProtocolVersion;
 import de.rub.nds.tlsattacker.core.protocol.message.AlertMessage;
@@ -52,9 +51,6 @@ import de.rub.nds.tlsattacker.core.state.TlsContext;
 import de.rub.nds.tlsattacker.core.workflow.WorkflowTrace;
 import de.rub.nds.tlsattacker.core.workflow.action.ReceiveAction;
 import de.rub.nds.tlsattacker.core.workflow.action.SendAction;
-import de.rub.nds.tlsattacker.transport.ClientConnectionEnd;
-import de.rub.nds.tlsattacker.transport.TransportHandler;
-import de.rub.nds.tlsattacker.transport.TransportHandlerFactory;
 import de.rub.nds.tlsattacker.util.UnlimitedStrengthEnabler;
 
 /**
@@ -116,15 +112,11 @@ public class TLSAttackerConnector {
 		config.setEnforceSettings(false);
 		
 		// Configure hosts
-		config.clearConnectionEnds();
-		ClientConnectionEnd connectionEnd = new ClientConnectionEnd();
-		connectionEnd.setHostname(targetHostname);
-		connectionEnd.setPort(targetPort);
-		config.addConnectionEnd(connectionEnd);
-		
+		OutboundConnection clientConnection = new OutboundConnection(targetPort,  targetHostname);
 		// Timeout that is used when waiting for incoming messages
-		config.setDefaultTimeout(timeout);		
-		
+		clientConnection.setTimeout(timeout);
+		config.setDefaultClientConnection(clientConnection);
+				
 		// Parse provided CipherSuite		
 		List<CipherSuite> cipherSuites = new LinkedList<>();
 		for(String cipherSuiteString: cipherSuiteStrings) {
@@ -205,13 +197,13 @@ public class TLSAttackerConnector {
 	 * @throws IOException
 	 */
 	public void initialiseSession() throws IOException {
-		WorkflowTrace trace = new WorkflowTrace(config);
-		state = new State(config, trace);
+		WorkflowTrace trace = new WorkflowTrace();
+		state = new State(config);//, trace);
 
 		TlsContext context = state.getTlsContext();
-		
+
 		//TransportHandler transporthandler = TransportHandlerFactory.createTransportHandler(config.getConnectionEnd());
-		ConnectorTransportHandler transporthandler = new ConnectorTransportHandler(context.getConfig().getDefaultTimeout(), config.getConnectionEnd().getHostname(), config.getConnectionEnd().getPort());
+		ConnectorTransportHandler transporthandler = new ConnectorTransportHandler(config.getDefaultClientConnection().getTimeout(), config.getDefaultClientConnection().getHostname(), config.getDefaultClientConnection().getPort());
 		context.setTransportHandler(transporthandler);
 		
 		context.initTransportHandler();
@@ -226,7 +218,11 @@ public class TLSAttackerConnector {
 	protected void sendMessage(ProtocolMessage message) {
 		List<ProtocolMessage> messages = new LinkedList<>();
 		messages.add(message);
-		new SendAction(messages).execute(state);
+
+		SendAction action = new SendAction(messages);
+		// Need to normalize otherwise an exception is thrown about no connection existing with alias 'null'
+		action.normalize();
+		action.execute(state);
 	}
     
 	/**
@@ -243,7 +239,7 @@ public class TLSAttackerConnector {
 		
 		List<String> receivedMessages = new LinkedList<>();
 		ReceiveAction action = new ReceiveAction(new LinkedList<ProtocolMessage>());
-		
+		action.normalize();
 		// Perform the actual receiving of the message
 		action.execute(state);
 		
