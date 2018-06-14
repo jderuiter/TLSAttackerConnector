@@ -17,7 +17,6 @@ import java.util.List;
 
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.core.config.Configurator;
-import org.bouncycastle.crypto.tls.AlertDescription;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 import de.rub.nds.modifiablevariable.bytearray.ByteArrayModificationFactory;
@@ -25,6 +24,7 @@ import de.rub.nds.modifiablevariable.bytearray.ModifiableByteArray;
 import de.rub.nds.tlsattacker.core.config.Config;
 import de.rub.nds.tlsattacker.core.connection.AliasedConnection;
 import de.rub.nds.tlsattacker.core.connection.OutboundConnection;
+import de.rub.nds.tlsattacker.core.constants.AlertDescription;
 import de.rub.nds.tlsattacker.core.constants.AlertLevel;
 import de.rub.nds.tlsattacker.core.constants.CipherSuite;
 import de.rub.nds.tlsattacker.core.constants.CompressionMethod;
@@ -239,6 +239,7 @@ public class TLSAttackerConnector {
 		
 		List<String> receivedMessages = new LinkedList<>();
 		ReceiveAction action = new ReceiveAction(new LinkedList<ProtocolMessage>());
+		// Need to normalize otherwise an exception is thrown about no connection existing with alias 'null'		
 		action.normalize();
 		// Perform the actual receiving of the message
 		action.execute(state);
@@ -248,8 +249,15 @@ public class TLSAttackerConnector {
 		// Iterate over all received messages and build a string containing their respective types
 		for(ProtocolMessage message: action.getReceivedMessages()) {
 			if(message.getProtocolMessageType() == ProtocolMessageType.ALERT) {
-				AlertMessage alert = (AlertMessage)message;
-				outputMessage = "ALERT_" + AlertLevel.getAlertLevel(alert.getLevel().getValue()).name() + "_" + AlertDescription.getName(alert.getDescription().getValue());
+				AlertMessage alert = (AlertMessage)message;		
+				AlertLevel level = AlertLevel.getAlertLevel(alert.getLevel().getValue());
+				AlertDescription description = AlertDescription.getAlertDescription(alert.getDescription().getValue());
+				outputMessage = "ALERT_" + level.name() + "_";
+				if(description == null) {
+					outputMessage += "UNKNOWN";
+				} else {	
+					outputMessage += description.name();
+				}
 			}
 			else {
 				outputMessage = message.toCompactString();
@@ -345,6 +353,12 @@ public class TLSAttackerConnector {
 			sendMessage(ad);
 			break;
 		
+		case "AlertWarningCloseNotify":
+			AlertMessage alert = new AlertMessage();
+			alert.setConfig(AlertLevel.WARNING, AlertDescription.CLOSE_NOTIFY);
+			sendMessage(alert);
+			break;
+			
 		default:
 			throw new Exception("Unknown input symbol: " + inputSymbol);
 		}
@@ -412,9 +426,11 @@ public class TLSAttackerConnector {
     			} else if(selectedCipherSuite.name().contains("RSA")) {
     				System.out.println("RSAClientKeyExchange: " + connector.processInput("RSAClientKeyExchange"));    				
     			}
+    			
     			System.out.println("ChangeCipherSpec: " + connector.processInput("ChangeCipherSpec"));
     			System.out.println("Finished: " + connector.processInput("Finished"));
     			System.out.println("ApplicationData: " + connector.processInput("ApplicationData"));
+    			System.out.println("AlertWarningCloseNotify: " + connector.processInput("AlertWarningCloseNotify"));
             }
             else if(connector.testCipherSuites) {
                 for(CipherSuite cs: CipherSuite.values()) {
@@ -423,8 +439,12 @@ public class TLSAttackerConnector {
             		connector.config.setDefaultSelectedCipherSuite(cs);
             		connector.config.setDefaultClientSupportedCiphersuites(cipherSuites);            		
             		
-                	connector.processInput("RESET");
-                	System.out.println(cs.name() + " " + connector.processInput("ClientHello"));
+                	try {
+                    	connector.processInput("RESET");                		
+                		System.out.println(cs.name() + " " + connector.processInput("ClientHello"));
+                	} catch(java.lang.UnsupportedOperationException | java.lang.IllegalArgumentException e) {
+                		System.out.println(cs.name() + " UNSUPPORTED");                		
+                	}
                 }
             } else {
             	connector.startListening();
