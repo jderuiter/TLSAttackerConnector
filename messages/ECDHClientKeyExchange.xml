@@ -1,0 +1,9 @@
+<workflowTrace>
+    <Send>
+        <messages>
+            <ECDHClientKeyExchange/>
+        </messages>
+        <records/>
+    </Send>
+</workflowTrace>
+

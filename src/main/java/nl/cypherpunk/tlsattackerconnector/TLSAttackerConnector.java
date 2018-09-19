@@ -1,9 +1,9 @@
 package nl.cypherpunk.tlsattackerconnector;
 
-import com.beust.jcommander.JCommander;
-import com.beust.jcommander.Parameter;
-
 import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
@@ -12,17 +12,20 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.security.Security;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+
+import javax.xml.bind.JAXBException;
 
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.core.config.Configurator;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
-import de.rub.nds.modifiablevariable.bytearray.ByteArrayModificationFactory;
-import de.rub.nds.modifiablevariable.bytearray.ModifiableByteArray;
+import com.beust.jcommander.JCommander;
+import com.beust.jcommander.Parameter;
+
 import de.rub.nds.tlsattacker.core.config.Config;
-import de.rub.nds.tlsattacker.core.connection.AliasedConnection;
 import de.rub.nds.tlsattacker.core.connection.OutboundConnection;
 import de.rub.nds.tlsattacker.core.constants.AlertDescription;
 import de.rub.nds.tlsattacker.core.constants.AlertLevel;
@@ -30,27 +33,16 @@ import de.rub.nds.tlsattacker.core.constants.CipherSuite;
 import de.rub.nds.tlsattacker.core.constants.CompressionMethod;
 import de.rub.nds.tlsattacker.core.constants.ProtocolMessageType;
 import de.rub.nds.tlsattacker.core.constants.ProtocolVersion;
+import de.rub.nds.tlsattacker.core.exceptions.WorkflowExecutionException;
 import de.rub.nds.tlsattacker.core.protocol.message.AlertMessage;
-import de.rub.nds.tlsattacker.core.protocol.message.ApplicationMessage;
-import de.rub.nds.tlsattacker.core.protocol.message.CertificateMessage;
-import de.rub.nds.tlsattacker.core.protocol.message.CertificateRequestMessage;
-import de.rub.nds.tlsattacker.core.protocol.message.ChangeCipherSpecMessage;
-import de.rub.nds.tlsattacker.core.protocol.message.ClientHelloMessage;
-import de.rub.nds.tlsattacker.core.protocol.message.DHClientKeyExchangeMessage;
-import de.rub.nds.tlsattacker.core.protocol.message.DHEServerKeyExchangeMessage;
-import de.rub.nds.tlsattacker.core.protocol.message.ECDHClientKeyExchangeMessage;
-import de.rub.nds.tlsattacker.core.protocol.message.FinishedMessage;
 import de.rub.nds.tlsattacker.core.protocol.message.ProtocolMessage;
-import de.rub.nds.tlsattacker.core.protocol.message.RSAClientKeyExchangeMessage;
-import de.rub.nds.tlsattacker.core.protocol.message.ServerHelloDoneMessage;
-import de.rub.nds.tlsattacker.core.protocol.message.ServerHelloMessage;
-import de.rub.nds.tlsattacker.core.protocol.message.extension.ExtensionMessage;
-import de.rub.nds.tlsattacker.core.protocol.message.extension.RenegotiationInfoExtensionMessage;
 import de.rub.nds.tlsattacker.core.state.State;
 import de.rub.nds.tlsattacker.core.state.TlsContext;
 import de.rub.nds.tlsattacker.core.workflow.WorkflowTrace;
+import de.rub.nds.tlsattacker.core.workflow.WorkflowTraceSerializer;
 import de.rub.nds.tlsattacker.core.workflow.action.ReceiveAction;
 import de.rub.nds.tlsattacker.core.workflow.action.SendAction;
+import de.rub.nds.tlsattacker.core.workflow.action.TlsAction;
 import de.rub.nds.tlsattacker.util.UnlimitedStrengthEnabler;
 
 /**
@@ -63,6 +55,7 @@ public class TLSAttackerConnector {
 	
 	Config config;
 	State state;
+	HashMap<String, WorkflowTrace> messages = new HashMap<>();
 
 	@Parameter(names = {"--listen", "-l"}, description = "Listen port")
 	int listenPort = 6666;	
@@ -81,12 +74,17 @@ public class TLSAttackerConnector {
 	@Parameter(names = {"--compressionMethod", "-cM"}, description = "CompressionMethod to use")
 	String compressionMethodString = "NULL";
 	
+	@Parameter(names = {"--messageDir", "-mD"}, description = "Directory to load messages from")
+	String messageDir = "messages";
+	
 	@Parameter(names = {"--help", "-h"}, description = "Display help", help = true)
 	private boolean help;
 	@Parameter(names = {"--test"}, description = "Run test handshake")
 	private boolean test;
 	@Parameter(names = {"--testCipherSuites"}, description = "Try to determine which CipherSuites are supported")
 	private boolean testCipherSuites;
+	@Parameter(names = {"--listMessages"}, description = "List all loaded messages")
+	private boolean listMessages;	
 	
 	/**
 	 * Create the TLS-Attacker connector
@@ -161,8 +159,8 @@ public class TLSAttackerConnector {
 		config.setDefaultClientSupportedCompressionMethods(compressionMethods);
 		
 		// Set default DH parameters
-		config.setDefaultDhGenerator(new BigInteger("2"));
-		config.setDefaultDhModulus(new BigInteger("6668014432879854274002278852208614463049243575172486268847999412414761893973482255240669516874141524239224030057949495697186951824868185545819975637245503840103415249493026666167468715286478870340074507098367006866803177055300900777576918011"));
+		config.setDefaultClientDhGenerator(new BigInteger("2"));
+		config.setDefaultClientDhModulus(new BigInteger("6668014432879854274002278852208614463049243575172486268847999412414761893973482255240669516874141524239224030057949495697186951824868185545819975637245503840103415249493026666167468715286478870340074507098367006866803177055300900777576918011"));
 		config.setDefaultClientDhPrivateKey(new BigInteger("30757838539894352412510553993926388250692636687493810307136098911018166940950"));
 		config.setDefaultClientDhPublicKey(new BigInteger("6668014432879854274002278852208614463049243575172486268847999412414761893973482255240669516874141524239224030057949495697186951824868185545819975637245503840103415249493026666167468715286478870340074507098367006866803177055300900777576918011"));
 		config.setDefaultServerDhPrivateKey(new BigInteger("30757838539894352412510553993926388250692636687493810307136098911018166940950"));
@@ -220,10 +218,43 @@ public class TLSAttackerConnector {
 		messages.add(message);
 
 		SendAction action = new SendAction(messages);
+		
+		WorkflowTrace test = new WorkflowTrace();
+		test.addTlsAction(action);
+		try {
+			System.out.println(WorkflowTraceSerializer.write(test));
+		} catch (JAXBException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		
 		// Need to normalize otherwise an exception is thrown about no connection existing with alias 'null'
 		action.normalize();
 		action.execute(state);
 	}
+	
+	/**
+	 * Execute the provided trace
+	 * 
+	 * @param trace WorkflowTrace to be executed
+	 */
+	protected void sendMessage(WorkflowTrace trace) {
+		for(TlsAction tlsAction: trace.getTlsActions()) {
+			try {
+				tlsAction.normalize();
+				tlsAction.execute(state);
+			} catch (WorkflowExecutionException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+		}
+	}	
     
 	/**
 	 * Receive message on the TLS connection
@@ -296,70 +327,9 @@ public class TLSAttackerConnector {
 		}
 
 		// Process the regular input symbols
-		switch(inputSymbol) {
-		case "ClientHello":
-			ClientHelloMessage clientHello = new ClientHelloMessage();
-			ExtensionMessage extension = new RenegotiationInfoExtensionMessage();
-			clientHello.addExtension(extension);
-			sendMessage(clientHello);
-			break;
-			
-		case "ServerHello":
-			sendMessage(new ServerHelloMessage());
-			break;			
-			
-		case "Certificate":
-			sendMessage(new CertificateMessage());
-			break;
-			
-		case "CertificateRequest":
-			sendMessage(new CertificateRequestMessage());
-			break;
-			
-		case "DHEServerKeyExchange":
-			sendMessage(new DHEServerKeyExchangeMessage());
-			break;
-			
-		case "ServerHelloDone":
-			sendMessage(new ServerHelloDoneMessage());
-			break;
-		
-		case "RSAClientKeyExchange":
-			sendMessage(new RSAClientKeyExchangeMessage());
-			break;
-
-		case "DHClientKeyExchange":
-			sendMessage(new DHClientKeyExchangeMessage());
-			break;
-			
-		case "ECDHClientKeyExchange":
-			sendMessage(new ECDHClientKeyExchangeMessage());
-			break;
-			
-		case "ChangeCipherSpec":
-			sendMessage(new ChangeCipherSpecMessage());
-			break;
-			
-		case "Finished":
-			sendMessage(new FinishedMessage());
-			break;
-			
-		case "ApplicationData":
-			ApplicationMessage ad = new ApplicationMessage();
-			ModifiableByteArray data = new ModifiableByteArray();
-			data.setModification(ByteArrayModificationFactory.explicitValue("GET / HTTP/1.0\n".getBytes()));
-			ad.setData(data);
-			
-			sendMessage(ad);
-			break;
-		
-		case "AlertWarningCloseNotify":
-			AlertMessage alert = new AlertMessage();
-			alert.setConfig(AlertLevel.WARNING, AlertDescription.CLOSE_NOTIFY);
-			sendMessage(alert);
-			break;
-			
-		default:
+		if(messages.containsKey(inputSymbol)) {
+			sendMessage(messages.get(inputSymbol));
+		} else {
 			throw new Exception("Unknown input symbol: " + inputSymbol);
 		}
 		
@@ -394,6 +364,50 @@ public class TLSAttackerConnector {
 	    serverSocket.close();
 	}
 	
+	/**
+	 * Load messages from the specified directory. Each message should be in a separate file with the xml extension and contain workflow trace in XML format.
+	 * 
+	 * @param dirPath Path to load files containing messages from
+	 * @throws Exception
+	 */
+	public void loadMessages(String dirPath) throws Exception {
+        File dir = new File(dirPath);
+        
+        if(!dir.isDirectory()) {
+        	throw new Exception(dirPath + " is not a valid directory");
+        }
+        
+        // Get a list of all *.xml files in the provided directory 
+        File[] files = dir.listFiles(new FilenameFilter() {
+            public boolean accept(File dir, String name) {
+                return name.toLowerCase().endsWith(".xml");
+            }
+        });
+        
+        for(File file: files) {
+        	// Strip .xml from the end to get the message name
+        	String name = file.getName().substring(0, file.getName().length() - 4);
+        	
+        	// Read the workflow trace from the file
+			FileInputStream input = new FileInputStream(file.getAbsolutePath());
+			WorkflowTrace trace = WorkflowTraceSerializer.read(input);
+			
+        	messages.put(name, trace);
+        }
+	}
+	
+	/**
+	 * @return A list of all loaded messages that can be used as input symbols
+	 */
+	public String[] listMessages() {
+		String[] list = new String[messages.size()];
+		int i = 0;
+		for(String name: messages.keySet()) {
+			list[i++] = name;
+		}
+		return list;
+	}
+	
 	public static void main(String ... argv) {
 		try {
 			TLSAttackerConnector connector = new TLSAttackerConnector();
@@ -411,6 +425,17 @@ public class TLSAttackerConnector {
             
             // Initialise the connector after the arguments are set
             connector.initialise();
+            
+            connector.loadMessages(connector.messageDir);
+            
+            if(connector.listMessages) {
+            	System.out.println("========================================");
+            	System.out.println("Loaded messages:");
+            	for(String msg: connector.listMessages()) {
+            		System.out.println(msg);
+            	}
+            	System.out.println("========================================");
+            }
             
             if(connector.test) {
     			System.out.println("ClientHello: " + connector.processInput("ClientHello"));

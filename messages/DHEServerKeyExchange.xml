@@ -1,0 +1,9 @@
+<workflowTrace>
+    <Send>
+        <messages>
+            <DHEServerKeyExchange/>
+        </messages>
+        <records/>
+    </Send>
+</workflowTrace>
+

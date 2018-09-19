@@ -1,0 +1,9 @@
+<workflowTrace>
+    <Send>
+        <messages>
+            <Certificate/>
+        </messages>
+        <records/>
+    </Send>
+</workflowTrace>
+

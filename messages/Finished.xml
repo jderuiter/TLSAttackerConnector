@@ -1,0 +1,9 @@
+<workflowTrace>
+    <Send>
+        <messages>
+            <Finished/>
+        </messages>
+        <records/>
+    </Send>
+</workflowTrace>
+

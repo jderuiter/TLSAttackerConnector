@@ -1,0 +1,15 @@
+<workflowTrace>
+    <Send>
+        <messages>
+            <Application>
+                <data>
+                    <byteArrayExplicitValueModification>
+                        <explicitValue>47 45 54 20 2F 20 48 54 54 50 2F 31 2E 30 0A</explicitValue>
+                    </byteArrayExplicitValueModification>
+                </data>
+            </Application>
+        </messages>
+        <records/>
+    </Send>
+</workflowTrace>
+

@@ -1,0 +1,10 @@
+<workflowTrace>
+    <Send>
+        <messages>
+            <Alert>
+                <config>AQA=</config>
+            </Alert>
+        </messages>
+        <records/>
+    </Send>
+</workflowTrace>

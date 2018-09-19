@@ -1,0 +1,12 @@
+<workflowTrace>
+	<Send>
+		<messages>
+			<ClientHello>
+				<extensions>
+					<RenegotiationInfoExtension/>
+				</extensions>
+			</ClientHello>
+		</messages>
+		<records/>
+	</Send>
+</workflowTrace>

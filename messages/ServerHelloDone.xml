@@ -1,0 +1,9 @@
+<workflowTrace>
+    <Send>
+        <messages>
+            <ServerHelloDone/>
+        </messages>
+        <records/>
+    </Send>
+</workflowTrace>
+
