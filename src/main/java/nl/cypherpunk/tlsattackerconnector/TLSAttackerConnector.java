@@ -246,6 +246,8 @@ public class TLSAttackerConnector {
 			try {
 				tlsAction.normalize();
 				tlsAction.execute(state);
+				// Reset the action so we can execute it again
+				tlsAction.setExecuted(false);
 			} catch (WorkflowExecutionException e) {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
