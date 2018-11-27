@@ -190,13 +190,12 @@ public class TLSAttackerConnector {
 	}	
 	
 	/**
-	 * Initialise a TLS connection by configuring a new context and connecting to the server 
+	 * Initialise a TLS connection by configuring a new context and connecting to the server
 	 * 
 	 * @throws IOException
 	 */
 	public void initialiseSession() throws IOException {
-		WorkflowTrace trace = new WorkflowTrace();
-		state = new State(config);//, trace);
+		state = new State(config);
 
 		TlsContext context = state.getTlsContext();
 
@@ -246,8 +245,6 @@ public class TLSAttackerConnector {
 			try {
 				tlsAction.normalize();
 				tlsAction.execute(state);
-				// Reset the action so we can execute it again
-				tlsAction.setExecuted(false);
 			} catch (WorkflowExecutionException e) {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
@@ -256,6 +253,9 @@ public class TLSAttackerConnector {
 				e.printStackTrace();
 			}
 		}
+
+		// Reset trace so we can execute it again
+		trace.reset();
 	}	
     
 	/**
