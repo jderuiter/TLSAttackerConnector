@@ -479,6 +479,7 @@ public class TLSAttackerConnector {
 		} catch(Exception e) {
 			System.err.println("Error occured: " + e.getMessage());
 			e.printStackTrace(System.err);
+			System.exit(1);
 		}
 	}
 }
