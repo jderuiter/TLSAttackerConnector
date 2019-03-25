@@ -36,6 +36,9 @@ import de.rub.nds.tlsattacker.core.constants.ProtocolVersion;
 import de.rub.nds.tlsattacker.core.exceptions.WorkflowExecutionException;
 import de.rub.nds.tlsattacker.core.protocol.message.AlertMessage;
 import de.rub.nds.tlsattacker.core.protocol.message.ProtocolMessage;
+import de.rub.nds.tlsattacker.core.record.AbstractRecord;
+import de.rub.nds.tlsattacker.core.record.Record;
+import de.rub.nds.tlsattacker.core.record.RecordCryptoComputations;
 import de.rub.nds.tlsattacker.core.state.State;
 import de.rub.nds.tlsattacker.core.state.TlsContext;
 import de.rub.nds.tlsattacker.core.workflow.WorkflowTrace;
@@ -269,26 +272,51 @@ public class TLSAttackerConnector {
 		if(state.getTlsContext().getTransportHandler().isClosed()) {
 			return SYMBOL_CONNECTION_CLOSED;
 		}
-		
+
 		List<String> receivedMessages = new LinkedList<>();
 		ReceiveAction action = new ReceiveAction(new LinkedList<ProtocolMessage>());
-		// Need to normalize otherwise an exception is thrown about no connection existing with alias 'null'		
+		// Need to normalize otherwise an exception is thrown about no connection existing with alias 'null'
 		action.normalize();
 		// Perform the actual receiving of the message
 		action.execute(state);
-		
+
 		String outputMessage;
-		
+
+        // Check for every record if the MAC is valid. If it is not, do not
+        // continue reading it since its contents might be illegible.
+        for(AbstractRecord abstractRecord: action.getReceivedRecords()) {
+            Record record = (Record) abstractRecord;
+
+            if(record == null) {
+                continue;
+            }
+
+            if(record.getComputations() == null) {
+                continue;
+            }
+
+            if(record.getComputations().getMacValid() == null) {
+                continue;
+            }
+
+            if(!record.getComputations().getMacValid()) {
+                if(state.getTlsContext().getTransportHandler().isClosed()) {
+                    return "InvalidMAC|" + SYMBOL_CONNECTION_CLOSED;
+                }
+                return "InvalidMAC";
+            }
+        }
+
 		// Iterate over all received messages and build a string containing their respective types
-		for(ProtocolMessage message: action.getReceivedMessages()) {
+        for(ProtocolMessage message: action.getReceivedMessages()) {
 			if(message.getProtocolMessageType() == ProtocolMessageType.ALERT) {
-				AlertMessage alert = (AlertMessage)message;		
+				AlertMessage alert = (AlertMessage)message;
 				AlertLevel level = AlertLevel.getAlertLevel(alert.getLevel().getValue());
 				AlertDescription description = AlertDescription.getAlertDescription(alert.getDescription().getValue());
 				outputMessage = "ALERT_" + level.name() + "_";
 				if(description == null) {
 					outputMessage += "UNKNOWN";
-				} else {	
+				} else {
 					outputMessage += description.name();
 				}
 			}
